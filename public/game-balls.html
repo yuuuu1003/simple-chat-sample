@@ -12,25 +12,25 @@
     <p>スマホを傾けてあざらしを動かし、魚をできるだけ多く取ろう！</p>
     <p>あなたのID: <span id="myid"></span></p>
     <button id="connect">ルームに入る</button>
+    <br /><br />
+    <button id="startBtn" style="font-size:20px; padding:10px 30px;">スタート</button>
     <h3 id="score">Score: 0</h3>
-    <h3 id="timer">Time: 30.00 s</h3>
+    <h3 id="timer" style="transition: color 0.3s;">Time: 30.00 s</h3>
 
     <script>
-      // --- 通信設定 ---
       let socket = io.connect();
-      let btn = document.querySelector("#connect");
       let g = 0, b = 0;
-
       let myid = sessionStorage.getItem("clientId");
+
       if (!myid) {
         myid = Math.random().toString(36).substring(2, 15);
         sessionStorage.setItem("clientId", myid);
       }
       document.querySelector("#myid").innerHTML = myid;
 
-      btn.addEventListener("click", () => {
+      document.querySelector("#connect").addEventListener("click", () => {
         socket.emit("join", "game");
-        btn.remove();
+        document.querySelector("#connect").remove();
       });
 
       socket.on("sensor", data => {
@@ -39,13 +39,13 @@
       });
 
       // --- ゲーム変数 ---
-      let x, y;
-      let vx = 0, vy = 0;
+      let x, y, vx = 0, vy = 0;
       let fishes = [];
       let score = 0;
-      let gameOver = false;
       let startTime;
-      const limit = 30 * 1000; // 制限時間30秒
+      const limit = 30 * 1000; // 30秒
+      let gameStarted = false;
+      let gameOver = false;
 
       function setup() {
         createCanvas(600, 600);
@@ -55,65 +55,96 @@
       function resetGame() {
         x = width / 2;
         y = height / 2;
-        vx = 0;
-        vy = 0;
+        vx = 0; vy = 0;
         score = 0;
         fishes = [];
         for (let i = 0; i < 10; i++) {
-          fishes.push({
-            x: random(60, width - 60),
-            y: random(60, height - 60),
+          fishes.push({ 
+            x: random(60, width - 60), 
+            y: random(60, height - 60), 
             size: 25,
-            caught: false,
+            respawnTimer: 0 // 再出現用タイマー
           });
         }
-        startTime = millis();
+        gameStarted = false;
         gameOver = false;
+        document.getElementById("score").textContent = "Score: 0";
+        document.getElementById("timer").textContent = "Time: 30.00 s";
+        document.getElementById("timer").style.color = "black";
       }
 
+      function startGame() {
+        if (!gameStarted) {
+          startTime = millis();
+          gameStarted = true;
+          gameOver = false;
+          document.getElementById("startBtn").disabled = true;
+        }
+      }
+
+      document.getElementById("startBtn").addEventListener("click", startGame);
+
       function draw() {
-        background(180, 220, 255); // 氷の海背景
+        background(180, 220, 255);
         drawIce();
 
-        // --- 経過時間 ---
-        let elapsed = millis() - startTime;
-        let remaining = max(0, (limit - elapsed) / 1000);
-        document.getElementById("timer").textContent = "Time: " + remaining.toFixed(2) + " s";
+        if (gameStarted && !gameOver) {
+          let elapsed = millis() - startTime;
+          let remaining = max(0, (limit - elapsed) / 1000);
 
-        if (remaining <= 0) {
-          gameOver = true;
-        }
+          // 5秒以下でタイマーの文字を赤く
+          let timerEl = document.getElementById("timer");
+          if (remaining <= 5) {
+            timerEl.style.color = "red";
+          } else {
+            timerEl.style.color = "black";
+          }
 
-        if (!gameOver) {
-          // --- 移動処理 ---
+          timerEl.textContent = "Time: " + remaining.toFixed(2) + " s";
+          if (remaining <= 0) gameOver = true;
+
+          // 移動
           vx += g * 0.05;
           vy += b * 0.05;
           vx *= 0.98;
           vy *= 0.98;
-          x += vx;
-          y += vy;
+          x += vx; y += vy;
           x = constrain(x, 60, width - 60);
           y = constrain(y, 60, height - 60);
 
-          // --- 魚と当たり判定 ---
+          // 魚との当たり判定＋自然なリスポーン処理
           for (let f of fishes) {
-            if (!f.caught && dist(x, y, f.x, f.y) < 60) {
-              f.caught = true;
+            if (f.respawnTimer > 0) {
+              f.respawnTimer -= deltaTime;
+              continue;
+            }
+
+            if (dist(x, y, f.x, f.y) < 60) {
               score++;
               document.getElementById("score").textContent = "Score: " + score;
+              f.respawnTimer = random(800, 1500); // 0.8〜1.5秒後に再出現
+              f.x = -9999; // 一時的に非表示にしておく
+              f.y = -9999;
+            }
+          }
+
+          // タイマー切れでリスポーン処理を完了
+          for (let f of fishes) {
+            if (f.respawnTimer <= 0 && (f.x < 0 || f.y < 0)) {
+              f.x = random(60, width - 60);
+              f.y = random(60, height - 60);
             }
           }
         }
 
-        // --- 魚を描画 ---
+        // 魚を描画
         for (let f of fishes) {
-          if (!f.caught) drawFish(f.x, f.y, f.size);
+          if (f.respawnTimer <= 0) drawFish(f.x, f.y, f.size);
         }
 
-        // --- あざらし描画 ---
+        // あざらし描画
         azarashi(x, y);
 
-        // --- ゲーム終了時 ---
         if (gameOver) {
           fill(0);
           textAlign(CENTER);
@@ -121,6 +152,7 @@
           text("🐟 終了！Score: " + score + " 🐟", width / 2, 80);
           textSize(20);
           text("タップでリトライ", width / 2, 110);
+          document.getElementById("startBtn").disabled = false;
         }
       }
 
@@ -128,7 +160,7 @@
         if (gameOver) resetGame();
       }
 
-      // --- 氷床の演出 ---
+      // --- 氷の床っぽい演出 ---
       function drawIce() {
         noStroke();
         fill(240, 250, 255);
@@ -137,7 +169,7 @@
         ellipse(width / 2, height / 2, 450, 450);
       }
 
-      // --- 魚描画 ---
+      // --- 魚 ---
       function drawFish(x, y, s) {
         fill(50, 100, 200);
         ellipse(x, y, s * 2, s);
@@ -148,7 +180,7 @@
         circle(x + s / 2, y - s / 6, s / 6);
       }
 
-      // --- あざらし描画関数（あなたの作品） ---
+      // --- あざらし ---
       function azarashi(x, y) {
         fill(255);
         stroke(0);
